@@ -566,6 +566,10 @@ bool apply_output_config(struct output_config *oc, struct sway_output *output) {
 	input_manager_configure_all_inputs();
 	// Reconfigure the cursor images, since the scale may have changed.
 	input_manager_configure_xcursor();
+
+	// If we've changed the config of an output restart the backgrounds as well
+	spawn_swaybg();
+
 	return true;
 }
 
@@ -600,13 +604,13 @@ static void default_output_config(struct output_config *oc,
 
 struct output_config *find_output_config(struct sway_output *sway_output) {
 	// Start with a default config for this output
-	struct output_config *result = new_output_config("merge");
+	char *name = sway_output->wlr_output->name;
+	struct output_config *result = new_output_config(name);
 	default_output_config(result, sway_output->wlr_output);
 
 	// Apply all matches in order
 	char id[128];
 	output_get_identifier(id, sizeof(id), sway_output);
-	char *name = sway_output->wlr_output->name;
 	for (int i = 0; i < config->output_configs->length; ++i) {
 		struct output_config *oc = config->output_configs->items[i];
 		if (!strcmp(oc->name, "*") || !strcmp(oc->name, name) || !strcmp(oc->name, id)) {
@@ -735,21 +739,8 @@ bool spawn_swaybg(void) {
 		return true;
 	}
 
-	size_t length = 2;
-	for (int i = 0; i < config->output_configs->length; i++) {
-		struct output_config *oc = config->output_configs->items[i];
-		if (!oc->background) {
-			continue;
-		}
-		if (strcmp(oc->background_option, "solid_color") == 0) {
-			length += 4;
-		} else if (oc->background_fallback) {
-			length += 8;
-		} else {
-			length += 6;
-		}
-	}
-
+	// At most the program, 8 arguments per output and the terminating NULL
+	size_t length = 2 + wl_list_length(&root->all_outputs) * 8;
 	char **cmd = calloc(length, sizeof(char *));
 	if (!cmd) {
 		sway_log(SWAY_ERROR, "Failed to allocate spawn_swaybg command");
@@ -758,8 +749,13 @@ bool spawn_swaybg(void) {
 
 	size_t i = 0;
 	cmd[i++] = config->swaybg_command;
-	for (int j = 0; j < config->output_configs->length; j++) {
-		struct output_config *oc = config->output_configs->items[j];
+
+	// Iterate all the outputs and write the command
+	list_t *output_configs = create_list();
+	struct sway_output *sway_output, *tmp;
+	wl_list_for_each_safe(sway_output, tmp, &root->all_outputs, link) {
+		struct output_config *oc = find_output_config(sway_output);
+		list_add(output_configs, oc);
 		if (!oc->background) {
 			continue;
 		}
@@ -780,7 +776,7 @@ bool spawn_swaybg(void) {
 				cmd[i++] = oc->background_fallback;
 			}
 		}
-		assert(i <= length);
+		assert(i < length);
 	}
 
 	for (size_t k = 0; k < i; k++) {
@@ -788,6 +784,12 @@ bool spawn_swaybg(void) {
 	}
 
 	bool result = _spawn_swaybg(cmd);
+
 	free(cmd);
+	for (int k = 0; k < output_configs->length; k++) {
+		free_output_config(output_configs->items[k]);
+	}
+	list_free(output_configs);
+
 	return result;
 }
