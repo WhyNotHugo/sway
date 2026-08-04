@@ -25,7 +25,7 @@ struct cmd_results *cmd_assign(int argc, char **argv) {
 
 	if (has_prefix(*argv, "→")) {
 		if (argc < 2) {
-			free(criteria);
+			criteria_destroy(criteria);
 			return cmd_results_new(CMD_INVALID, "Missing workspace");
 		}
 		--argc;
@@ -42,7 +42,7 @@ struct cmd_results *cmd_assign(int argc, char **argv) {
 		if (strcmp(*argv, "number") == 0) {
 			--argc; ++argv;
 			if (argv[0][0] < '0' || argv[0][0] > '9') {
-				free(criteria);
+				criteria_destroy(criteria);
 				return cmd_results_new(CMD_INVALID,
 						"Invalid workspace number '%s'", argv[0]);
 			}
